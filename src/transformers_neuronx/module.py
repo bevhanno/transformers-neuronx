@@ -408,7 +408,7 @@ class PretrainedModel(LowMemoryModule):
                 expected_batch_size = kwargs.get("batch_size")
                 assert batch_size_for_shared_caches == expected_batch_size, \
                     f"invalid batch_size_for_shared_caches ({batch_size_for_shared_caches}), {expected_batch_size} is expected"   
-                if bsh_cache_layout:
+                if bsh_cache_layout and not neuron_config.continuous_batching.optimized_paged_attention:
                     assert isinstance(n_positions, list) and len(n_positions) == 1
                     assert isinstance(context_length_estimate, list) and len(context_length_estimate) == 1, \
                     	"BSH cache layout does not support multi-bucketing"
@@ -418,8 +418,11 @@ class PretrainedModel(LowMemoryModule):
         _sanity_check(**kwargs)
         config = AutoConfig.from_pretrained(pretrained_model_path)
         model = cls(config, *model_args, **kwargs)
-        pretrained_model_path = maybe_download_weights(pretrained_model_path, **kwargs)
-        model.load_state_dict_dir(pretrained_model_path)
+        if getattr(config, 'is_presharded_checkpoint', False):
+            model._using_presharded_weights = pretrained_model_path
+        else:
+            pretrained_model_path = maybe_download_weights(pretrained_model_path, **kwargs)
+            model.load_state_dict_dir(pretrained_model_path)
         return model
 
     def load_state_dict_dir(self, pretrained_model_path):

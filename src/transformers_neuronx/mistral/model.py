@@ -65,13 +65,8 @@ class MistralForSampling(base.NeuronModelBase):
         self.decoder_lm_head = self.decoder_param_set.init_token_decoder(unroll=self.unroll, buckets=self.token_buckets, model_obj=self)
         self.decoder_lm_head_for_context = self.decoder_param_set.init_context_decoder(unroll=self.context_unroll, buckets=self.context_buckets, model_obj=self)
 
-        # Track number of processed tokens for sliding window attention
-        self.num_processed_tokens = torch.tensor([0], dtype=torch.int32)
-
     def load_weights(self):
-
-        # Materialize the embedding to CPU
-        self.chkpt_model.model.embed_tokens.materialize()
+        self.materialize_embeddings()
 
         ops.init()
 
@@ -114,6 +109,13 @@ class MistralForSampling(base.NeuronModelBase):
         lm_head.nullify()
 
         self.decoder_lm_head.to_neuron()
+        self.init_rest_of_model()
+
+    def materialize_embeddings(self):
+        # Materialize the embedding to CPU
+        self.chkpt_model.model.embed_tokens.materialize()
+    
+    def init_rest_of_model(self):
         self.decoder_lm_head.use_executor = True
 
         if self.context_buckets:
@@ -126,22 +128,8 @@ class MistralForSampling(base.NeuronModelBase):
                         model.use_executor = True
                     self.decoder_lm_head_for_context[context_length_estimate,batch_size] = model
 
-    def reset(self):
-        self.decoder_lm_head.reset()
-        # Reset the token counter for context encoding
-        # num_processed_tokens tracks number of processed tokens for sliding window attention
-        self.num_processed_tokens = torch.tensor([0], dtype=torch.int32)
-
     def forward(self, input_ids, cache_ids=None, start_ids=None):
-        # Compute the window starting index for specific mask patterns
-        # For other patterns we pass in a default value of 0, it won't be used
-        if self.config.window_size:
-            curr_window_start = torch.max(torch.tensor(0, dtype=torch.long), self.num_processed_tokens - self.config.window_size)
-        else:
-            curr_window_start = self.num_processed_tokens
         inputs, *rst = self._preprocess(input_ids, start_ids=start_ids, cache_ids=cache_ids)
-        last_token_id = rst[-1]
-        rst = (*rst, curr_window_start)
         if not self.neuron_config.on_device_embedding:
             inputs = self.chkpt_model.model.embed_tokens(inputs)
             if self.neuron_config.attention_layout == LAYOUT_HSB:
@@ -149,10 +137,6 @@ class MistralForSampling(base.NeuronModelBase):
         logits = self._forward(inputs, *rst)
         logits = self._postprocess(logits, start_ids=start_ids)
 
-        # Increment the token counter, last_token_id = 0 when in decoder mode
-        # WARNING: Taking a single curr_window_start value for all sequences.
-        # TODO: Get curr_window_start out of cache_ids, instead of sending it from inputs.
-        self.num_processed_tokens += (last_token_id[:1]+1)
         return logits
 
     def sample(self, input_ids, sequence_length, start_ids=None,

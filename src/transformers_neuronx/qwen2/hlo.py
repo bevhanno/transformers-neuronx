@@ -18,7 +18,7 @@ from transformers_neuronx import hlo, utils
 from transformers_neuronx import constants
 from transformers_neuronx import utils
 from transformers_neuronx.layers import transformer, rotary, attention, attention_utils, flash_decoding
-from transformers_neuronx.llama.config import LlamaConfig
+from transformers_neuronx.qwen2.config import Qwen2Config
 from transformers_neuronx.config import NeuronConfig
 from transformers_neuronx.constants import LAYOUT_BSH, LAYOUT_HSB
 from transformers_neuronx.hlo import quantize_kv_cache_direct_cast, dequantize_kv_cache_direct_cast
@@ -26,10 +26,10 @@ from transformers_neuronx.hlo import quantize_kv_cache_direct_cast, dequantize_k
 from transformers_neuronx.nki.compile import nki_call
 
 
-class LlamaForSamplingNoEmbeddingHlo:
+class Qwen2ForSamplingNoEmbeddingHlo:
 
     def __init__(self,
-        config: LlamaConfig,
+        config: Qwen2Config,
         neuron_config: Optional[NeuronConfig] = None
     ):
         self.config = config
@@ -302,7 +302,7 @@ class LlamaForSamplingNoEmbeddingHlo:
         key = hlo.slice_along(nki_output, -1, (n_heads_tp+n_kv_heads_tp)*slice_lim, start=n_heads_tp*slice_lim)
         value = hlo.slice_along(nki_output, -1, (n_heads_tp+2*n_kv_heads_tp)*slice_lim, start=(n_heads_tp+n_kv_heads_tp)*slice_lim)
 
-        # shard over head (llama/hlo.py)
+        # shard over head (qwen2/hlo.py)
         active_q_sizes = n_active_tokens, n_seqs, n_heads_tp, d_head
         active_kv_sizes = n_active_tokens, n_seqs, n_kv_heads_tp, d_head
         query = hlo.reshape(query, active_q_sizes)
@@ -496,5 +496,3 @@ class LlamaForSamplingNoEmbeddingHlo:
         # O = (C @ wO) + bO
         output = attention.output(context, out_weight, out_scales, out_bias, tp_degree, self.neuron_config)
         return output, updated_keys, updated_values
-
-

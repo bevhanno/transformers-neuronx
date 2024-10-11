@@ -14,7 +14,7 @@
 # ==============================================================================
 from transformers_neuronx import utils
 
-class LlamaConfig:
+class Qwen2Config:
 
     def __init__(
             self,
@@ -54,5 +54,4 @@ class LlamaConfig:
         self.batch_size = batch_size
         self.amp = amp
         self.tp_degree = tp_degree
-        self.model_type = 'llama'
-
+        self.model_type = 'qwen2'

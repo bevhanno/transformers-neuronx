@@ -23,18 +23,18 @@ from transformers_neuronx import bucket
 from transformers_neuronx import base
 from transformers_neuronx.constants import LAYOUT_BSH, LAYOUT_HSB, KV_SHARD_PAD
 from transformers_neuronx.config import NeuronConfig
-from transformers_neuronx.llama.config import LlamaConfig
-from transformers_neuronx.llama.modules import LlamaForCausalLM
-from transformers_neuronx.llama.hlo import LlamaForSamplingNoEmbeddingHlo
+from transformers_neuronx.qwen2.config import Qwen2Config
+from transformers_neuronx.qwen2.modules import Qwen2ForCausalLM
+from transformers_neuronx.qwen2.hlo import Qwen2ForSamplingNoEmbeddingHlo
 import warnings
 
-class LlamaForSampling(base.NeuronModelBase):
+class Qwen2ForSampling(base.NeuronModelBase):
 
     def __init__(self, config, *, n_positions=2048, batch_size=1, amp='f32', tp_degree=2,
                  context_length_estimate=None, context_unroll=None, unroll=None,
                  neuron_config=None, prefixed_length=0, **kwargs):
-        config = LlamaConfig(config, n_positions, batch_size, amp, tp_degree)
-        super().__init__(LlamaForCausalLM, config)
+        config = Qwen2Config(config, n_positions, batch_size, amp, tp_degree)
+        super().__init__(Qwen2ForCausalLM, config)
         self.context_pre_hook = None
         self.context_hook = None
         self.config = config
@@ -81,7 +81,7 @@ class LlamaForSampling(base.NeuronModelBase):
 
         self.batch_sizes = bucket.batch_sizes(batch_size)
         self.context_batch_sizes = [1] if self.neuron_config and self.neuron_config.continuous_batching else self.batch_sizes
-        hlo_builder = LlamaForSamplingNoEmbeddingHlo(config, neuron_config=self.neuron_config)
+        hlo_builder = Qwen2ForSamplingNoEmbeddingHlo(config, neuron_config=self.neuron_config)
         self.decoder_param_set = decoder.DecoderLmHeadForSamplingNoEmbedding(
             tp_degree=tp_degree, n_positions_list=self.token_buckets, n_active_tokens=1, batch_size=self.batch_sizes,
             attention_head_size=config.attention_head_size, amp=amp,
@@ -110,9 +110,9 @@ class LlamaForSampling(base.NeuronModelBase):
                 is_unit_scale = False
             new_layer = self.decoder_lm_head.new_layer(is_unit_scale=is_unit_scale)
             new_layer.add_pre_attention_layer_norm(layer.input_layernorm.weight.detach(), None)
-            new_layer.add_attention_query(attn.q_proj.weight.detach().T, None)
-            new_layer.add_attention_key(attn.k_proj.weight.detach().T, None)
-            new_layer.add_attention_value(attn.v_proj.weight.detach().T, None)
+            new_layer.add_attention_query(attn.q_proj.weight.detach().T, attn.q_proj.bias.detach())
+            new_layer.add_attention_key(attn.k_proj.weight.detach().T, attn.k_proj.bias.detach())
+            new_layer.add_attention_value(attn.v_proj.weight.detach().T, attn.v_proj.bias.detach())
             if self.neuron_config and self.neuron_config.attn_output_transposed:
                 new_layer.add_attention_output(attn.o_proj.weight.T.detach(), None, sharding=0, transposed=True)
             else:
@@ -365,7 +365,7 @@ class LlamaForSampling(base.NeuronModelBase):
 
         return result
 
-class FIDLlamaForSampling(LlamaForSampling):
+class FIDQwen2ForSampling(Qwen2ForSampling):
 
     def __init__(self, config, *, n_positions=2048, batch_size=1, amp='f32', tp_degree=2,
                  context_length_estimate=None, context_unroll=None, unroll=None,
@@ -375,7 +375,7 @@ class FIDLlamaForSampling(LlamaForSampling):
                         tp_degree=tp_degree, context_length_estimate=context_length_estimate,
                         context_unroll=context_unroll, unroll=unroll, neuron_config=neuron_config,
                         reorder_cache=False, **kwargs)
-        assert len(self.decoder_lm_head.batch_size) == 1, "FIDLlamaForSampling does not support compilation for \
+        assert len(self.decoder_lm_head.batch_size) == 1, "FIDQwen2ForSampling does not support compilation for \
             multiple batch sizes"
         self.batch_size = self.decoder_lm_head.batch_size[0]
         self.bos_token_id = self.config.bos_token_id
@@ -389,7 +389,7 @@ class FIDLlamaForSampling(LlamaForSampling):
         They will be mixed and generate a single output sequence.
         """
 
-        # In FID-Llama, first, context encoding is done w/ generating any output token for context
+        # In FID-Qwen2, first, context encoding is done w/ generating any output token for context
         # Here batch-size are different context+queries of single run
 
         offset = 0
@@ -414,5 +414,3 @@ class FIDLlamaForSampling(LlamaForSampling):
                                           eos_token_id=self.config.eos_token_id, top_k=top_k, streamer=streamer)
 
         return result
-
-

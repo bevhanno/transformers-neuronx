@@ -91,8 +91,7 @@ class OPTForSampling(base.NeuronModelBase):
 
     def load_weights(self):
         ops.init()
-        self.chkpt_model.model.decoder.embed_tokens.materialize()
-        self.chkpt_model.model.decoder.embed_positions.materialize()
+        self.materialize_embeddings()
         for layer in self.chkpt_model.model.decoder.layers:
             layer.materialize()
             attn = layer.self_attn
@@ -128,7 +127,13 @@ class OPTForSampling(base.NeuronModelBase):
             self.decoder_lm_head.add_pre_layer_parameter(self.chkpt_model.model.decoder.embed_positions.weight.detach(), sharding=1, allow_pad=True)
         lm_head.nullify()
         self.decoder_lm_head.to_neuron()
-
+        self.init_rest_of_model()
+    
+    def materialize_embeddings(self):
+        self.chkpt_model.model.decoder.embed_tokens.materialize()
+        self.chkpt_model.model.decoder.embed_positions.materialize()
+    
+    def init_rest_of_model(self):
         if self.context_buckets:
             for context_length_estimate in self.context_buckets:
                 for batch_size in self.batch_sizes:
@@ -315,11 +320,13 @@ class OPTForSamplingNoEmbeddingHlo:
         return hidden
 
     def pre_layer(self, hidden, cache_ids, start_ids, last_token_id, curr_window_start, *weights):
-        mask, active_mask = hlo.attention_mask(cache_ids, start_ids, self.n_positions)
+        mask, active_mask = hlo.attention_mask(cache_ids, start_ids, self.n_positions,
+                                               last_token_id=last_token_id, neuron_config=self.neuron_config)
         return hidden, last_token_id, curr_window_start, cache_ids, start_ids, mask, active_mask
 
     def layer(self, hidden, last_token_id, curr_window_start, cache_ids, start_ids, mask, active_mask, attn_k_cache, attn_v_cache,
               pre_attn_ln_weight, pre_attn_ln_bias,
+              fused_pre_attn_ln_qkv_weight,
               attn_q_weight, attn_q_scales, attn_q_bias,
               attn_k_weight, attn_k_scales, attn_k_bias,
               attn_v_weight, attn_v_scales, attn_v_bias,
